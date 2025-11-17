@@ -3,36 +3,21 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Multi Task Timer — Fixed (w/ End Time)</title>
+<title>Multi Task Timer — Fixed (Strict Lock) — End-time adjust</title>
 <style>
-  :root{
-    --bg:#071427; --card:#0b1220; --accent:#06b6d4; --muted:#94a3b8;
-  }
-  body{
-    margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Arial;
-    background:linear-gradient(180deg,#071427 0%, #021018 100%); color:#e6eef6;
-    min-height:100vh; padding:28px;
-  }
+  :root{ --bg:#071427; --card:#0b1220; --accent:#06b6d4; --muted:#94a3b8; }
+  body{ margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Arial; background:linear-gradient(180deg,#071427 0%, #021018 100%); color:#e6eef6; min-height:100vh; padding:28px; }
   .wrap{ max-width:1100px; margin:0 auto; }
   header{ display:flex; align-items:center; gap:12px; margin-bottom:18px; flex-wrap:wrap;}
   h1{margin:0; font-size:20px}
   button.add{ background:var(--accent); color:#022029; border:0; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:700 }
   .grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px; align-items:start }
-
-  .timer-card{
-    background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-    border-radius:12px; padding:14px; border:1px solid rgba(255,255,255,0.03);
-    box-shadow: 0 8px 20px rgba(0,0,0,0.6);
-  }
+  .timer-card{ background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius:12px; padding:14px; border:1px solid rgba(255,255,255,0.03); box-shadow: 0 8px 20px rgba(0,0,0,0.6); }
   .timer-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px }
   label{ font-size:12px; color:var(--muted); display:block; margin-bottom:4px }
-  input[type="text"], input[type="number"], input[type="datetime-local"]{
-    background:transparent; border:1px solid rgba(255,255,255,0.06); padding:8px 10px; color:inherit; border-radius:8px;
-    color-scheme: dark; /* Ensures date picker is dark */
-  }
+  input[type="text"], input[type="number"], input[type="datetime-local"]{ background:transparent; border:1px solid rgba(255,255,255,0.06); padding:8px 10px; color:inherit; border-radius:8px; color-scheme: dark; }
   input[type="number"]{ width:80px }
   input[type="datetime-local"] { width: 100%; box-sizing: border-box; }
-
   .controls{ display:flex; gap:8px; margin-left:auto }
   .controls button{ padding:8px 10px; border-radius:8px; border:0; cursor:pointer; font-weight:600 }
   .btn-primary{ background:var(--accent); color:#022029 }
@@ -43,604 +28,274 @@
   .block.active{ background: linear-gradient(90deg, var(--accent), #8be7ff); transform: scaleY(1.05) }
   .small{ font-size:12px; color:var(--muted); margin-top:8px }
   .flash{ animation: flash-bg 800ms linear infinite }
-  @keyframes flash-bg {
-    0%{ box-shadow: 0 8px 20px rgba(0,0,0,0.6) }
-    50%{ box-shadow: 0 0 40px 6px rgba(6,182,212,0.08) }
-    100%{ box-shadow: 0 8px 20px rgba(0,0,0,0.6) }
-  }
+  .copy-btn{ border:0; background:transparent; color:var(--muted); cursor:pointer; font-weight:700; padding:6px 8px; border-radius:8px; }
+  .lock-active{ background: linear-gradient(180deg,#05a5bd,#09d0ee); color:#022029; border:0; }
+  .status-line{ font-size:12px; color:var(--muted); margin-top:6px }
+  .status-line.error{ color:#ffb4b4 }
+  .start-history{ font-size:12px; color:var(--muted); margin-top:8px; max-height:80px; overflow:auto; }
+  .adjust-btn{ background:transparent; border:1px dashed rgba(255,255,255,0.06); padding:6px 8px; border-radius:8px; cursor:pointer; color:var(--muted); }
+  .end-adjust-row{ display:flex; gap:6px; align-items:center; margin-top:8px }
+  .end-adjust-row input[type='number']{ width:64px }
 
-  @media (max-width:720px){
-    .timer-row{ flex-direction:column; align-items:stretch }
-    .controls{ margin-left:0 }
-  }
+  /* collapse styles */
+  .collapse-btn{ background:transparent; border:1px solid rgba(255,255,255,0.06); padding:6px 8px; border-radius:8px; cursor:pointer; color:var(--muted); font-weight:700; margin-left:auto; }
+  .timer-card.collapsed{ padding-bottom:10px; }
+  .timer-card.collapsed .collapse-content{ display:none !important; }
+  .timer-card .first-row{ width:100%; display:flex; gap:10px; align-items:center; }
+  .timer-card .first-row .time-display{ margin-left:auto; }
+
+  @keyframes flash-bg { 0%{ box-shadow: 0 8px 20px rgba(0,0,0,0.6) } 50%{ box-shadow: 0 0 40px 6px rgba(6,182,212,0.08) } 100%{ box-shadow: 0 8px 20px rgba(0,0,0,0.6) } }
+
+  @media (max-width:720px){ .timer-row{ flex-direction:column; align-items:stretch } .controls{ margin-left:0 } }
+
+  .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:22px; background:rgba(10,20,30,0.95); padding:10px 14px; border-radius:8px; color:#cfeff6; font-size:13px; box-shadow:0 6px 18px rgba(0,0,0,0.6); z-index:9999; }
 </style>
 </head>
 <body>
   <div class="wrap">
     <header>
-      <h1>Multi Task Timer — Fixed</h1>
-      
-      <div id="realtimeClock" style="flex:1; text-align:center; font-family:ui-monospace, monospace; color:var(--muted); font-size:13px; line-height:1.4;">
-        IST: --:--:-- <br> Epoch: ...
-      </div>
-      
+      <h1>Multi Task Timer — Fixed (Strict Lock)</h1>
+      <div id="realtimeClock" style="flex:1; text-align:center; font-family:ui-monospace, monospace; color:var(--muted); font-size:13px; line-height:1.4;">IST: --:--:-- <br> Epoch: ...</div>
       <button id="addTimerBtn" class="add">+ Add Timer</button>
       <div style="margin-left:auto; color:var(--muted); font-size:13px">Each timer is fully independent</div>
     </header>
-
     <div id="timers" class="grid" aria-live="polite"></div>
   </div>
 
 <script>
-/*
-  Fixed Multi-Timer
-  - Each TaskTimer instance is fully self-contained.
-  - No shared global alarm loops/intervals.
-  - Instances tracked in an array (timersList) for safety.
-  - Buttons and handlers are bound per-instance.
-  - Shows IST/Epoch end time per timer.
-  - Shows global IST/Epoch clock in header.
-  - Can set duration from a specific end date/time.
-  - NEW: End date/time picker defaults to current local time.
-*/
-
 const timersContainer = document.getElementById('timers');
 const addBtn = document.getElementById('addTimerBtn');
 const clockDisplay = document.getElementById('realtimeClock');
 let TIMER_COUNTER = 0;
-const timersList = []; // keep references to instances
-
-// request notification permission once
-if ('Notification' in window && Notification.permission === 'default') {
-  Notification.requestPermission().catch(()=>{});
-}
-
-// --- Global Clock Function ---
-function updateRealtimeClock() {
-  const now = new Date();
-  const istOptions = {
-    timeZone: 'Asia/Kolkata',
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  };
-  const istTime = now.toLocaleString('en-US', istOptions);
-  const epochTime = Math.floor(now.getTime() / 1000);
-  
-  if (clockDisplay) {
-    clockDisplay.innerHTML = `IST: ${istTime} <br> Epoch: ${epochTime}`;
-  }
-}
-// Start the global clock
-updateRealtimeClock();
-setInterval(updateRealtimeClock, 1000);
-// --- End Global Clock ---
-
+const timersList = [];
+function showToast(msg, t = 1400){ const el = document.createElement('div'); el.className='toast'; el.textContent=msg; document.body.appendChild(el); setTimeout(()=> el.style.opacity='0.0', t-200); setTimeout(()=> el.remove(), t); }
+if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(()=>{});
+function updateRealtimeClock(){ const now=new Date(); const istOptions={ timeZone:'Asia/Kolkata', hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' }; const istTime = now.toLocaleString('en-US', istOptions); const epochTime=Math.floor(now.getTime()/1000); clockDisplay.innerHTML = `IST: ${istTime} <br> Epoch: ${epochTime}`; }
+updateRealtimeClock(); setInterval(updateRealtimeClock,1000);
 
 class TaskTimer {
   constructor(id){
-    this.id = id;
-
-    // instance state
-    this.totalSeconds = 0;
-    this.remaining = 0;
-    this.intervalId = null;         // interval id (per-instance)
-    this.startedAt = 0;
-    this.paused = false;
-
-    // audio/alarm state (per-instance)
-    this.alarmPlaying = false;
-    this.audioCtx = null;
-    this.oscillator = null;
-    this.alarmIntervalId = null;    // id returned by setInterval for pitch modulation
-
-    // DOM references
-    this.card = null;
-    this.taskNameInput = null;
-    this.hoursInput = null;
-    this.minutesInput = null;
-    this.secondsInput = null;
-    this.timeText = null;
-    this.startBtn = null;
-    this.pauseBtn = null;
-    this.resetBtn = null;
-    this.stopAlarmBtn = null;
-    this.clearBtn = null;
-    this.removeBtn = null;
-    this.defrag = null;
-    this.percentText = null;
-    this.blocks = [];
-    this.BLOCK_COUNT = 60;
-    
-    // End time DOM references
-    this.endTimeDisplay = null;
-    this.endTimeIST = null;
-    this.endTimeEpoch = null;
-    
-    // Set from end time DOM references
-    this.endTimePicker = null;
-    this.setFromEndTimeBtn = null;
-
-    this._buildDOM();
-    this._bindHandlers();
-    this._updateFromInputs(); // initialize
-    this._updateUI();
+    this.id=id; this.totalSeconds=0; this.remaining=0; this.intervalId=null; this.startedAt=0; this.paused=false;
+    this.locked=false; this.lockedEnd_ms=null; this.scheduledStartTimeout=null; this.scheduledCountdownInterval=null;
+    this.alarmPlaying=false; this.audioCtx=null; this.oscillator=null; this.alarmIntervalId=null;
+    this.card=null; this.taskNameInput=null; this.hoursInput=null; this.minutesInput=null; this.secondsInput=null; this.timeText=null; this.startBtn=null; this.pauseBtn=null; this.resetBtn=null; this.stopAlarmBtn=null; this.clearBtn=null; this.removeBtn=null; this.defrag=null; this.percentText=null; this.blocks=[];
+    this.BLOCK_COUNT=60;
+    this.endTimeDisplay=null; this.endTimeIST=null; this.endTimeEpoch=null; this.endTimePicker=null; this.setFromEndTimeBtn=null;
+    this.copyEndBtn=null; this.lockToggleBtn=null; this.scheduledStatus=null; this.startHistoryEl=null; this.adjustEndBtn=null;
+    this.endAddHours=null; this.endAddMinutes=null; this.endAddSeconds=null; this.endApplyAdd=null;
+    this.collapseBtn=null; this.cardBody=null;
+    this._buildDOM(); this._bindHandlers(); this._updateFromInputs(); this._updateUI();
   }
 
   _buildDOM(){
-    const card = document.createElement('div');
-    card.className = 'timer-card';
-    card.dataset.tid = this.id;
+    const card=document.createElement('div'); card.className='timer-card'; card.dataset.tid=this.id;
     card.innerHTML = `
-      <div class="timer-row">
-        <div style="flex:1; min-width:120px">
-          <label>Task name</label>
-          <input class="taskName" type="text" placeholder="E.g. Edit video / Study AI" />
-        </div>
-
-        <div>
-          <label>Hours</label>
-          <input class="hours" type="number" min="0" step="1" value="0" />
-        </div>
-
-        <div>
-          <label>Minutes</label>
-          <input class="minutes" type="number" min="0" max="59" step="1" value="30" />
-        </div>
-
-        <div>
-          <label>Seconds</label>
-          <input class="seconds" type="number" min="0" max="59" step="1" value="0" />
-        </div>
-
-        <div class="time-display"><span class="timeText">00:30:00</span></div>
-      </div>
-      
-      <div class="timer-row" style="margin-bottom:12px; border-top: 1px solid rgba(255,255,255,0.05); padding-top:12px;">
-        <div style="flex:1; min-width: 150px;">
-          <label>Set duration by end time (Your Local)</label>
-          <input class="endTimePicker" type="datetime-local" />
-        </div>
-        <div style="align-self: end;">
-          <button class="setFromEndTime btn-ghost" style="padding:8px 10px; width: 100%;">Set Duration</button>
-        </div>
-      </div>
-      
-      <div class="end-time-display" style="display:none; font-size:12px; color:var(--muted); margin-bottom:10px; padding: 0 4px;">
-        <span>Est. End (IST): <strong class="endTimeIST">--:--:--</strong></span>
-        <span style="margin-left:14px;">Epoch: <strong class="endTimeEpoch">...</strong></span>
+      <div class="timer-row first-row">
+        <div style="flex:1; min-width:120px"><label>Task name</label><input class="taskName" type="text" placeholder="E.g. Edit video / Study AI" /></div>
+        <div><label>Hours</label><input class="hours" type="number" min="0" step="1" value="0" /></div>
+        <div><label>Minutes</label><input class="minutes" type="number" min="0" max="59" step="1" value="5" /></div>
+        <div><label>Seconds</label><input class="seconds" type="number" min="0" max="59" step="1" value="0" /></div>
+        <div class="time-display"><span class="timeText">00:05:00</span></div>
+        <button class="collapse-btn" aria-expanded="true" title="Collapse timer">▾</button>
       </div>
 
-      <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
-        <div class="controls" style="margin-left:0">
-          <button class="start btn-primary">Start</button>
-          <button class="pause btn-ghost" disabled>Pause</button>
-          <button class="reset btn-ghost" disabled>Reset</button>
-          <button class="stopAlarm btn-ghost" style="display:none">Stop Alarm</button>
-          <button class="clear btn-ghost">Clear</button>
-          <button class="remove btn-ghost" title="Remove this timer">Remove</button>
+      <div class="collapse-content">
+        <div class="timer-row" style="margin-bottom:12px; border-top: 1px solid rgba(255,255,255,0.05); padding-top:12px;">
+          <div style="flex:1; min-width: 150px;">
+            <label>Set duration by end time (Your Local)</label>
+            <input class="endTimePicker" type="datetime-local" />
+            <div class="end-adjust-row">
+              <input type="number" class="endAddHours" min="0" placeholder="h" title="Add hours" />
+              <input type="number" class="endAddMinutes" min="0" max="59" placeholder="m" title="Add minutes" />
+              <input type="number" class="endAddSeconds" min="0" max="59" placeholder="s" title="Add seconds" />
+              <button class="endApplyAdd btn-ghost" title="Add to end time">Apply</button>
+            </div>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <button class="copy-end copy-btn" title="Copy end time & epoch">Copy</button>
+            <button class="setFromEndTime btn-ghost" style="padding:8px 10px; width:120px;">Set Duration</button>
+            <button class="lock-toggle btn-ghost" title="Lock this end time">Lock</button>
+          </div>
         </div>
-        <div style="margin-left:auto; font-size:12px; color:var(--muted)"><span class="percentText">100%</span></div>
-      </div>
 
-      <div class="defrag" aria-hidden="true"></div>
-      <div class="small">Visual: 60 blocks represent remaining percentage.</div>
+        <div class="end-time-display" style="display:none; font-size:12px; color:var(--muted); margin-bottom:10px; padding: 0 4px;">
+          <span>Est. End (IST): <strong class="endTimeIST">--:--:--</strong></span>
+          <span style="margin-left:14px;">Epoch: <strong class="endTimeEpoch">...</strong></span>
+        </div>
+
+        <div class="status-line" style="display:none;"></div>
+        <div style="margin-top:6px; display:flex; gap:8px; align-items:center;">
+          <button class="adjust-end adjust-btn" style="display:none;">Adjust end to allow start now</button>
+        </div>
+        <div class="start-history" style="display:none;"></div>
+
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+          <div class="controls" style="margin-left:0">
+            <button class="start btn-primary">Start</button>
+            <button class="pause btn-ghost" disabled>Pause</button>
+            <button class="reset btn-ghost" disabled>Reset</button>
+            <button class="stopAlarm btn-ghost" style="display:none">Stop Alarm</button>
+            <button class="clear btn-ghost">Clear</button>
+            <button class="remove btn-ghost" title="Remove this timer">Remove</button>
+          </div>
+          <div style="margin-left:auto; font-size:12px; color:var(--muted)"><span class="percentText">100%</span></div>
+        </div>
+
+        <div class="defrag" aria-hidden="true"></div>
+        <div class="small">Visual: 60 blocks represent remaining percentage.</div>
+      </div>
     `;
     timersContainer.prepend(card);
 
-    // save refs
-    this.card = card;
-    this.taskNameInput = card.querySelector('.taskName');
-    this.hoursInput = card.querySelector('.hours');
-    this.minutesInput = card.querySelector('.minutes');
-    this.secondsInput = card.querySelector('.seconds');
-    this.timeText = card.querySelector('.timeText');
-    this.startBtn = card.querySelector('.start');
-    this.pauseBtn = card.querySelector('.pause');
-    this.resetBtn = card.querySelector('.reset');
-    this.stopAlarmBtn = card.querySelector('.stopAlarm');
-    this.clearBtn = card.querySelector('.clear');
-    this.removeBtn = card.querySelector('.remove');
-    this.defrag = card.querySelector('.defrag');
-    this.percentText = card.querySelector('.percentText');
-    
-    // Save end time refs
-    this.endTimeDisplay = card.querySelector('.end-time-display');
-    this.endTimeIST = card.querySelector('.endTimeIST');
-    this.endTimeEpoch = card.querySelector('.endTimeEpoch');
-    
-    // Save 'set from end time' refs
-    this.endTimePicker = card.querySelector('.endTimePicker');
-    this.setFromEndTimeBtn = card.querySelector('.setFromEndTime');
+    this.card=card;
+    this.taskNameInput=card.querySelector('.taskName');
+    this.hoursInput=card.querySelector('.hours');
+    this.minutesInput=card.querySelector('.minutes');
+    this.secondsInput=card.querySelector('.seconds');
+    this.timeText=card.querySelector('.timeText');
+    this.startBtn=card.querySelector('.start');
+    this.pauseBtn=card.querySelector('.pause');
+    this.resetBtn=card.querySelector('.reset');
+    this.stopAlarmBtn=card.querySelector('.stopAlarm');
+    this.clearBtn=card.querySelector('.clear');
+    this.removeBtn=card.querySelector('.remove');
+    this.defrag=card.querySelector('.defrag');
+    this.percentText=card.querySelector('.percentText');
+    this.endTimeDisplay=card.querySelector('.end-time-display');
+    this.endTimeIST=card.querySelector('.endTimeIST');
+    this.endTimeEpoch=card.querySelector('.endTimeEpoch');
+    this.endTimePicker=card.querySelector('.endTimePicker');
+    this.setFromEndTimeBtn=card.querySelector('.setFromEndTime');
+    this.copyEndBtn=card.querySelector('.copy-end');
+    this.lockToggleBtn=card.querySelector('.lock-toggle');
+    this.scheduledStatus=card.querySelector('.status-line');
+    this.startHistoryEl=card.querySelector('.start-history');
+    this.adjustEndBtn=card.querySelector('.adjust-end');
+    this.endAddHours=card.querySelector('.endAddHours');
+    this.endAddMinutes=card.querySelector('.endAddMinutes');
+    this.endAddSeconds=card.querySelector('.endAddSeconds');
+    this.endApplyAdd=card.querySelector('.endApplyAdd');
 
-    // --- NEW: Set default value for datetime picker ---
-    // This formats the current local date and time to YYYY-MM-DDThh:mm
-    try {
-      const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
-      this.endTimePicker.value = now.toISOString().slice(0, 16);
-    } catch (e) {
-      console.warn("Could not set default date-time", e);
-    }
-    // --- End New ---
+    // collapse elements
+    this.collapseBtn = card.querySelector('.collapse-btn');
+    this.cardBody = card.querySelector('.collapse-content');
 
-    // build blocks (instance-local)
-    this.defrag.innerHTML = '';
-    for (let i=0; i<this.BLOCK_COUNT; i++){
-      const b = document.createElement('div');
-      b.className = 'block';
-      this.defrag.appendChild(b);
-      this.blocks.push(b);
-    }
-
-    // allow keyboard focus per card
-    this.card.tabIndex = 0;
+    try{ const now=new Date(Date.now()-new Date().getTimezoneOffset()*60000); this.endTimePicker.value = now.toISOString().slice(0,16); }catch(e){}
+    this.defrag.innerHTML=''; for(let i=0;i<this.BLOCK_COUNT;i++){ const b=document.createElement('div'); b.className='block'; this.defrag.appendChild(b); this.blocks.push(b); }
+    this.card.tabIndex=0;
   }
 
   _bindHandlers(){
-    // bind methods so 'this' remains correct
-    this._startHandler = (e) => { e && e.preventDefault(); this.start(); };
-    this._pauseHandler = (e) => { e && e.preventDefault(); this.pause(); };
-    this._resetHandler = (e) => { e && e.preventDefault(); this.reset(); };
-    this._stopAlarmHandler = (e) => { e && e.preventDefault(); this.stopAlarm(true); };
-    this._clearHandler = (e) => { e && e.preventDefault(); this.clear(); };
-    this._removeHandler = (e) => { e && e.preventDefault(); this.destroy(); };
-    
-    // bind 'set from end time'
-    this._setFromEndTimeHandler = (e) => { e && e.preventDefault(); this.setDurationFromEndTime(); };
+    this._startHandler=(e)=>{ e&&e.preventDefault(); this.start(); };
+    this._pauseHandler=(e)=>{ e&&e.preventDefault(); this.pause(); };
+    this._resetHandler=(e)=>{ e&&e.preventDefault(); this.reset(); };
+    this._stopAlarmHandler=(e)=>{ e&&e.preventDefault(); this.stopAlarm(true); };
+    this._clearHandler=(e)=>{ e&&e.preventDefault(); this.clear(); };
+    this._removeHandler=(e)=>{ e&&e.preventDefault(); this.destroy(); };
 
+    this._setFromEndTimeHandler=(e)=>{ e&&e.preventDefault(); this.setDurationFromEndTime(); };
     this.startBtn.addEventListener('click', this._startHandler);
     this.pauseBtn.addEventListener('click', this._pauseHandler);
     this.resetBtn.addEventListener('click', this._resetHandler);
     this.stopAlarmBtn.addEventListener('click', this._stopAlarmHandler);
     this.clearBtn.addEventListener('click', this._clearHandler);
     this.removeBtn.addEventListener('click', this._removeHandler);
-    
-    // add 'set from end time' listener
     this.setFromEndTimeBtn.addEventListener('click', this._setFromEndTimeHandler);
 
-    // live update inputs only affect this instance (and only when not running)
-    const inputs = [this.hoursInput, this.minutesInput, this.secondsInput];
-    inputs.forEach(inp => {
-      inp.addEventListener('input', () => {
-        if (!this.intervalId) {
-          this._updateFromInputs();
-          this._updateUI();
-        }
-      });
-    });
+    this._copyHandler=()=>this._copyEndTimeToClipboard(); this.copyEndBtn.addEventListener('click', this._copyHandler);
+    this._lockHandler=()=>this._toggleLock(); this.lockToggleBtn.addEventListener('click', this._lockHandler);
+    this._adjustHandler=()=>this._adjustEndToNowPlusDuration(); this.adjustEndBtn.addEventListener('click', this._adjustHandler);
+    this._applyAddHandler=()=>this._applyAddToEndTime(); this.endApplyAdd.addEventListener('click', this._applyAddHandler);
 
-    // local keyboard shortcuts when card focused
-    this.card.addEventListener('keydown', (ev) => {
-      if (ev.code === 'Space'){ ev.preventDefault(); this.intervalId ? this.pause() : this.start(); }
-      if (ev.key && ev.key.toLowerCase() === 'r') { this.reset(); }
-    });
-  }
-  
-  // --- Set Duration from End Time Method ---
-  setDurationFromEndTime() {
-    const endTimeValue = this.endTimePicker.value;
-    if (!endTimeValue) {
-      alert("Please pick a date and time first.");
-      return;
-    }
+    const inputs=[this.hoursInput,this.minutesInput,this.secondsInput];
+    inputs.forEach(inp=>{ inp.addEventListener('input', ()=>{ if(!this.intervalId){ this._updateFromInputs(); this._updateUI(); this._updateScheduledStatus(); } }); });
 
-    // datetime-local input value is parsed as local time by new Date()
-    const endTime_ms = new Date(endTimeValue).getTime();
-    const now_ms = Date.now();
+    this.endTimePicker.addEventListener('change', ()=>{ if(this.locked){ const val=this.endTimePicker.value; const ms=new Date(val).getTime(); if(!isNaN(ms)){ this.lockedEnd_ms=ms; this._calculateAndShowEndTime(); this._updateScheduledStatus(); } } else { this._calculateAndShowEndTime(); } });
 
-    const durationSeconds = Math.round((endTime_ms - now_ms) / 1000);
+    // collapse handlers
+    this._collapseHandler = (e) => { e && e.preventDefault(); this._toggleCollapse(); };
+    this.collapseBtn.addEventListener('click', this._collapseHandler);
+    this.collapseBtn.addEventListener('keydown', (ev)=>{ if(ev.key===' '||ev.key==='Enter'){ ev.preventDefault(); this._toggleCollapse(); } });
 
-    if (durationSeconds <= 0) {
-      alert("Please select a time in the future.");
-      return;
-    }
-
-    // Deconstruct into H, M, S
-    let s = durationSeconds;
-    const h = Math.floor(s / 3600); s %= 3600;
-    const m = Math.floor(s / 60); s %= 60;
-    const sec = s;
-
-    // Populate the input fields
-    this.hoursInput.value = h;
-    this.minutesInput.value = m;
-    this.secondsInput.value = sec;
-
-    // Manually trigger updates
-    this._updateFromInputs();
-    this._updateUI();
+    this.card.addEventListener('keydown',(ev)=>{ if(ev.code==='Space' && ev.target === this.card){ ev.preventDefault(); this.intervalId?this.pause():this.start(); } if(ev.key && ev.key.toLowerCase()==='r'){ this.reset(); } });
   }
 
-  _updateFromInputs(){
-    const h = Math.max(0, parseInt(this.hoursInput.value || 0));
-    const m = Math.max(0, parseInt(this.minutesInput.value || 0));
-    const s = Math.max(0, parseInt(this.secondsInput.value || 0));
-    this.totalSeconds = h*3600 + m*60 + s;
-    this.remaining = this.totalSeconds;
-    
-    // Calculate end time
-    this._calculateAndShowEndTime();
-  }
+  async _copyEndTimeToClipboard(){ try{ const val=this.endTimePicker.value; if(!val){ showToast('No end time set'); return; } const epoch=Math.floor(new Date(val).getTime()/1000); const text=`${val} (epoch: ${epoch})`; await navigator.clipboard.writeText(text); showToast('End time copied'); }catch(e){ console.warn('Copy failed',e); showToast('Copy failed'); } }
 
-  // --- Calculate and Show End Time Function ---
-  _calculateAndShowEndTime(){
-    let durationInSeconds = 0;
-    let baseTime_ms = 0;
+  _applyAddToEndTime(){ try{ const aH = Math.max(0, parseInt(this.endAddHours.value||0)); const aM = Math.max(0, parseInt(this.endAddMinutes.value||0)); const aS = Math.max(0, parseInt(this.endAddSeconds.value||0)); if(!aH && !aM && !aS){ showToast('No values to add'); return; } const cur = this.endTimePicker.value; const curMs = new Date(cur).getTime(); if(isNaN(curMs)){ alert('Please set a valid end time first'); return; } const addMs = (aH*3600 + aM*60 + aS) * 1000; const newMs = curMs + addMs; const dt = new Date(newMs); const local = new Date(dt.getTime() - dt.getTimezoneOffset()*60000); this.endTimePicker.value = local.toISOString().slice(0,16); if(this.locked) this.lockedEnd_ms = newMs; this._calculateAndShowEndTime(); this._updateScheduledStatus(); showToast('End time updated'); }catch(e){ console.warn(e); showToast('Could not update end'); } }
 
-    if (this.intervalId || this.paused) { // Timer is running or paused
-      // Use the original start time and total duration for a fixed end time
-      durationInSeconds = this.totalSeconds;
-      baseTime_ms = this.startedAt;
-    } else { // Timer is stopped/reset
-      // Calculate based on current inputs + now
-      durationInSeconds = this.remaining; // 'remaining' is set by _updateFromInputs
-      baseTime_ms = Date.now();
-    }
+  _toggleLock(){ this.locked = !this.locked; if(this.locked){ const val=this.endTimePicker.value; const ms=new Date(val).getTime(); if(isNaN(ms)){ alert('Please choose a valid end time before locking.'); this.locked=false; return; } this.lockedEnd_ms = ms; this.lockToggleBtn.classList.add('lock-active'); this.lockToggleBtn.textContent='Locked'; this._calculateAndShowEndTime(); showToast('End time locked'); } else { this.lockedEnd_ms=null; this.lockToggleBtn.classList.remove('lock-active'); this.lockToggleBtn.textContent='Lock'; this.scheduledStatus.style.display='none'; this.adjustEndBtn.style.display='none'; showToast('Unlocked'); } this._updateScheduledStatus(); }
 
-    if (durationInSeconds <= 0) {
-      this.endTimeDisplay.style.display = 'none';
-      return;
-    }
-
-    const end_ms = baseTime_ms + (durationInSeconds * 1000);
-    const endDate = new Date(end_ms);
-
-    const istOptions = {
-      timeZone: 'Asia/Kolkata',
-      hour12: true,
-      hour: 'numeric',
-      minute: 'numeric',
-      second: 'numeric'
-    };
-
-    const endTimeIST = endDate.toLocaleString('en-US', istOptions);
-    const endTimeEpoch = Math.floor(end_ms / 1000);
-
-    this.endTimeIST.textContent = endTimeIST;
-    this.endTimeEpoch.textContent = endTimeEpoch;
-    this.endTimeDisplay.style.display = 'block';
-  }
-
-  _toHHMMSS(s){
-    s = Math.max(0, Math.floor(s));
-    const h = Math.floor(s/3600); s%=3600;
-    const m = Math.floor(s/60); s%=60;
-    const sec = s;
-    return [h,m,sec].map(v=>String(v).padStart(2,'0')).join(':');
-  }
-
-  _updateUI(){
-    this.timeText.textContent = this._toHHMMSS(this.remaining || 0);
-    const pct = this.totalSeconds ? Math.round((this.remaining/this.totalSeconds)*100) : 0;
-    this.percentText.textContent = pct + '%';
-    const activeCount = this.totalSeconds ? Math.round((this.remaining/this.totalSeconds||0)*this.BLOCK_COUNT) : 0;
-    this.blocks.forEach((b,i)=> i < activeCount ? b.classList.add('active') : b.classList.remove('active'));
-  }
-
-  start(){
-    if (this.intervalId) return; // already running
-    // compute if not set
-    if (!this.totalSeconds) this._updateFromInputs();
-    if (!this.totalSeconds) { alert('Please set a duration'); return; }
-    if (!this.remaining) this.remaining = this.totalSeconds;
-    
-    // Only set startedAt if it's not a resume from pause
-    if (!this.paused) {
-        this.startedAt = Date.now();
-    }
-    
-    this.paused = false;
-    this.startBtn.disabled = true;
-    this.pauseBtn.disabled = false;
-    this.resetBtn.disabled = false;
-    this._requestNotificationPermission();
-    
-    // "Lock in" the end time display on start
-    this._calculateAndShowEndTime();
-    
-    // accurate-ish tick using fixed step; kept per-instance
-    this.intervalId = setInterval(()=> this._tick(), 250);
-    this._updateUI();
-  }
-
-  pause(){
-    if (!this.intervalId) return;
-    clearInterval(this.intervalId);
-    this.intervalId = null;
-    this.paused = true;
-    this.startBtn.disabled = false;
-    this.pauseBtn.disabled = true;
-    
-    // Recalculate 'remaining' based on elapsed time since 'startedAt'
-    const elapsed_ms = Date.now() - this.startedAt;
-    const elapsed_s = elapsed_ms / 1000;
-    this.remaining = Math.max(0, this.totalSeconds - elapsed_s);
-    
-    this._updateUI(); // Update UI with precise remaining time
-  }
-
-  reset(){
-    if (this.intervalId){
-      clearInterval(this.intervalId);
-      this.intervalId = null;
-    }
-    this._updateFromInputs(); // This will also call _calculateAndShowEndTime
-    this.paused = false;
-    this.startBtn.disabled = false;
-    this.pauseBtn.disabled = true;
-    this.resetBtn.disabled = true;
-    this.stopAlarm(false);
-    this.card.classList.remove('flash');
-    this._updateUI();
-  }
-
-  _tick(){
-    // We calculate remaining time based on start time for accuracy.
-    const elapsed_ms = Date.now() - this.startedAt;
-    const elapsed_s = elapsed_ms / 1000;
-    this.remaining = Math.max(0, this.totalSeconds - elapsed_s);
-    
-    if (this.remaining <= 0){
-      this.remaining = 0;
-      if (this.intervalId){ clearInterval(this.intervalId); this.intervalId = null; }
-      this._onFinish();
-    }
-    this._updateUI();
-  }
-
-  _onFinish(){
-    this.startBtn.disabled = false;
-    this.pauseBtn.disabled = true;
-    this.resetBtn.disabled = false;
-    const title = this.taskNameInput.value.trim() || 'Timer';
-    this._showNotification(`${title} — Time is up!`);
-    this.playAlarm();
-    try { if (navigator.vibrate) navigator.vibrate([300,150,300]); } catch(e){}
-    this.card.classList.add('flash');
-    this.stopAlarmBtn.style.display = 'inline-block';
-  }
-
-  _requestNotificationPermission(){
-    if (!('Notification' in window)) return;
-    if (Notification.permission === 'default') Notification.requestPermission().catch(()=>{});
-  }
-
-  _showNotification(body){
-    if (!('Notification' in window)) return;
-    if (Notification.permission === 'granted'){
-      const n = new Notification(this.taskNameInput.value.trim() || 'Timer', { body, silent: true });
-      n.onclick = () => window.focus();
+  // --- NEW: collapse toggle ---
+  _toggleCollapse(){
+    const isCollapsed = this.card.classList.toggle('collapsed');
+    this.collapseBtn.setAttribute('aria-expanded', String(!isCollapsed));
+    this.collapseBtn.textContent = isCollapsed ? '▸' : '▾';
+    // ensure that controls that should be accessible remain focusable when expanded again
+    if(!isCollapsed){
+      // restore focusable attributes if we had changed any (nothing changed by default)
     }
   }
 
-  playAlarm(){
-    if (this.alarmPlaying) return;
-    this.alarmPlaying = true;
-    try {
-      // make a fresh AudioContext per-instance
-      this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      this.oscillator = this.audioCtx.createOscillator();
-      const gain = this.audioCtx.createGain();
-      this.oscillator.type = 'sine';
-      this.oscillator.frequency.value = 880;
-      this.oscillator.connect(gain);
-      gain.connect(this.audioCtx.destination);
-      gain.gain.value = 0.0001;
-      this.oscillator.start();
-      gain.gain.exponentialRampToValueAtTime(0.08, this.audioCtx.currentTime + 0.6);
+  setDurationFromEndTime(){ const endTimeValue=this.endTimePicker.value; if(!endTimeValue){ alert('Please pick a date and time first.'); return; } const endTime_ms=new Date(endTimeValue).getTime(); const now_ms=Date.now(); const durationSeconds=Math.round((endTime_ms-now_ms)/1000); if(durationSeconds<=0){ alert('Please select a time in the future.'); return; } let s=durationSeconds; const h=Math.floor(s/3600); s%=3600; const m=Math.floor(s/60); s%=60; const sec=s; this.hoursInput.value=h; this.minutesInput.value=m; this.secondsInput.value=sec; this._updateFromInputs(); this._updateUI(); if(this.locked){ this.lockedEnd_ms=endTime_ms; this._updateScheduledStatus(); } }
 
-      // modulation loop kept in instance-scoped interval id
-      let up = true;
-      this.alarmIntervalId = setInterval(() => {
-        if (!this.oscillator) return;
-        this.oscillator.frequency.setValueAtTime(up ? 880 : 660, this.audioCtx.currentTime);
-        up = !up;
-      }, 600);
+  _updateFromInputs(){ const h=Math.max(0,parseInt(this.hoursInput.value||0)); const m=Math.max(0,parseInt(this.minutesInput.value||0)); const s=Math.max(0,parseInt(this.secondsInput.value||0)); this.totalSeconds=h*3600 + m*60 + s; this.remaining=this.totalSeconds; this._calculateAndShowEndTime(); }
 
-    } catch(err){
-      console.warn('WebAudio failed for instance', this.id, err);
-      alert('Time is up!');
-    }
+  _calculateAndShowEndTime(){ let durationInSeconds=0; let baseTime_ms=0; if(this.locked && this.lockedEnd_ms){ durationInSeconds=this.totalSeconds; const end_ms=this.lockedEnd_ms; const endDate=new Date(end_ms); const istOptions={ timeZone:'Asia/Kolkata', hour12:true, hour:'numeric', minute:'numeric', second:'numeric' }; const endTimeIST=endDate.toLocaleString('en-US',istOptions); const endTimeEpoch=Math.floor(end_ms/1000); this.endTimeIST.textContent=endTimeIST; this.endTimeEpoch.textContent=endTimeEpoch; this.endTimeDisplay.style.display='block'; return; } if(this.intervalId || this.paused){ durationInSeconds=this.totalSeconds; baseTime_ms=this.startedAt; } else { durationInSeconds=this.remaining; baseTime_ms=Date.now(); } if(durationInSeconds<=0){ this.endTimeDisplay.style.display='none'; return; } const end_ms = baseTime_ms + (durationInSeconds*1000); const endDate=new Date(end_ms); const istOptions={ timeZone:'Asia/Kolkata', hour12:true, hour:'numeric', minute:'numeric', second:'numeric' }; const endTimeIST=endDate.toLocaleString('en-US',istOptions); const endTimeEpoch=Math.floor(end_ms/1000); this.endTimeIST.textContent=endTimeIST; this.endTimeEpoch.textContent=endTimeEpoch; this.endTimeDisplay.style.display='block'; }
+
+  _toHHMMSS(s){ s=Math.max(0,Math.floor(s)); const h=Math.floor(s/3600); s%=3600; const m=Math.floor(s/60); s%=60; const sec=s; return [h,m,sec].map(v=>String(v).padStart(2,'0')).join(':'); }
+  _formatMsToHHMMSS(ms){ if(ms<0) ms=0; const s=Math.floor(ms/1000); const h=Math.floor(s/3600); let r=s%3600; const m=Math.floor(r/60); const sec=r%60; return [h,m,sec].map(v=>String(v).padStart(2,'0')).join(':'); }
+
+  _updateUI(){ this.timeText.textContent=this._toHHMMSS(this.remaining||0); const pct=this.totalSeconds?Math.round((this.remaining/this.totalSeconds)*100):0; this.percentText.textContent=pct + '%'; const activeCount=this.totalSeconds?Math.round((this.remaining/this.totalSeconds||0)*this.BLOCK_COUNT):0; this.blocks.forEach((b,i)=> i<activeCount?b.classList.add('active'):b.classList.remove('active')); }
+
+  _startWithStartedAt(startedAt_ms, recordStart=true){ if(this.intervalId) return; if(!this.totalSeconds) this._updateFromInputs(); if(!this.totalSeconds){ alert('Please set a duration'); return; } this.startedAt=startedAt_ms; this.paused=false; this.startBtn.disabled=true; this.pauseBtn.disabled=false; this.resetBtn.disabled=false; this._requestNotificationPermission(); if(recordStart) this._recordStartTimestamp(this.startedAt); this._calculateAndShowEndTime(); this.intervalId=setInterval(()=>this._tick(),250); this._updateUI(); }
+
+  start(){ if(this.intervalId) return; if(!this.totalSeconds) this._updateFromInputs(); if(!this.totalSeconds){ alert('Please set a duration'); return; } if(!this.remaining) this.remaining=this.totalSeconds; if(this.locked && this.lockedEnd_ms){ const desiredStart_ms = this.lockedEnd_ms - (this.totalSeconds*1000); const now=Date.now(); if(desiredStart_ms>now){ const wait=desiredStart_ms-now; this._clearScheduledStart(); this.scheduledStartTimeout=setTimeout(()=>{ this.scheduledStartTimeout=null; this._startWithStartedAt(desiredStart_ms,true); this._clearScheduledCountdown(); this.scheduledStatus.style.display='none'; }, wait); this._startScheduledCountdown(desiredStart_ms); this.scheduledStatus.style.display='block'; this.startBtn.disabled=true; this.pauseBtn.disabled=true; this.resetBtn.disabled=false; showToast('Timer scheduled to start'); return; } else { this.scheduledStatus.style.display='block'; this.scheduledStatus.classList.add('error'); this.scheduledStatus.textContent='Start time already passed for the locked end time. Please choose a later end time or use "Adjust end to allow start now".'; this.adjustEndBtn.style.display='inline-block'; this.startBtn.disabled=true; return; } }
+    if(!this.paused) this.startedAt=Date.now(); this.paused=false; this.startBtn.disabled=true; this.pauseBtn.disabled=false; this.resetBtn.disabled=false; this._requestNotificationPermission(); this._calculateAndShowEndTime(); this.intervalId=setInterval(()=>this._tick(),250); this._recordStartTimestamp(this.startedAt); this._updateUI();
   }
 
-  stopAlarm(userStop = true){
-    if (!this.alarmPlaying) return;
-    this.alarmPlaying = false;
-    try {
-      if (this.alarmIntervalId) { clearInterval(this.alarmIntervalId); this.alarmIntervalId = null; }
-      if (this.oscillator) { try { this.oscillator.stop(); } catch(e){} this.oscillator = null; }
-      if (this.audioCtx) { try { this.audioCtx.close(); } catch(e){} this.audioCtx = null; }
-    } catch(e){}
-    this.card.classList.remove('flash');
-    this.stopAlarmBtn.style.display = 'none';
-    if (userStop) try{ if (navigator.vibrate) navigator.vibrate(80); }catch(e){}
-  }
+  pause(){ if(!this.intervalId) return; clearInterval(this.intervalId); this.intervalId=null; this.paused=true; this.startBtn.disabled=false; this.pauseBtn.disabled=true; const elapsed_ms=Date.now()-this.startedAt; const elapsed_s=elapsed_ms/1000; this.remaining=Math.max(0,this.totalSeconds-elapsed_s); this._updateUI(); }
 
-  clear(){
-    // stop any running interval & alarm and reset inputs (this instance only)
-    if (this.intervalId){ clearInterval(this.intervalId); this.intervalId = null; }
-    this.stopAlarm(false);
-    this.totalSeconds = 0;
-    this.remaining = 0;
-    this.paused = false;
-    this.taskNameInput.value = '';
-    this.hoursInput.value = 0;
-    this.minutesInput.value = 0;
-    this.secondsInput.value = 0;
-    this.startBtn.disabled = false;
-    this.pauseBtn.disabled = true;
-    this.resetBtn.disabled = true;
-    this.card.classList.remove('flash');
-    
-    // NEW: Reset date/time picker to current time
-    try {
-      const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
-      this.endTimePicker.value = now.toISOString().slice(0, 16);
-    } catch (e) {}
-    
-    // Hide end time display
-    if(this.endTimeDisplay) {
-      this.endTimeDisplay.style.display = 'none';
-    }
-    
-    this._updateUI();
-  }
+  reset(){ if(this.intervalId){ clearInterval(this.intervalId); this.intervalId=null; } this._updateFromInputs(); this.paused=false; this.startBtn.disabled=false; this.pauseBtn.disabled=true; this.resetBtn.disabled=true; this.stopAlarm(false); this.card.classList.remove('flash'); this._updateUI(); }
 
-  destroy(){
-    // gracefully clean instance
-    if (this.intervalId){ clearInterval(this.intervalId); this.intervalId = null; }
-    this.stopAlarm(false);
-    // remove event listeners (defensive)
-    this.startBtn.removeEventListener('click', this._startHandler);
-    this.pauseBtn.removeEventListener('click', this._pauseHandler);
-    this.resetBtn.removeEventListener('click', this._resetHandler);
-    this.stopAlarmBtn.removeEventListener('click', this._stopAlarmHandler);
-    this.clearBtn.removeEventListener('click', this._clearHandler);
-    this.removeBtn.removeEventListener('click', this._removeHandler);
-    
-    // remove 'set from end time' listener
-    this.setFromEndTimeBtn.removeEventListener('click', this._setFromEndTimeHandler);
+  _tick(){ const elapsed_ms=Date.now()-this.startedAt; const elapsed_s=elapsed_ms/1000; this.remaining=Math.max(0,this.totalSeconds-elapsed_s); if(this.remaining<=0){ this.remaining=0; if(this.intervalId){ clearInterval(this.intervalId); this.intervalId=null; } this._onFinish(); } this._updateUI(); }
 
+  _onFinish(){ this.startBtn.disabled=false; this.pauseBtn.disabled=true; this.resetBtn.disabled=false; const title=this.taskNameInput.value.trim()||'Timer'; this._showNotification(`${title} — Time is up!`); this.playAlarm(); try{ if(navigator.vibrate) navigator.vibrate([300,150,300]); }catch(e){} this.card.classList.add('flash'); this.stopAlarmBtn.style.display='inline-block'; }
 
-    // remove DOM
+  _requestNotificationPermission(){ if(!('Notification' in window)) return; if(Notification.permission==='default') Notification.requestPermission().catch(()=>{}); }
+  _showNotification(body){ if(!('Notification' in window)) return; if(Notification.permission==='granted'){ const n=new Notification(this.taskNameInput.value.trim()||'Timer',{body,silent:true}); n.onclick=()=>window.focus(); } }
+
+  playAlarm(){ if(this.alarmPlaying) return; this.alarmPlaying=true; try{ this.audioCtx=new(window.AudioContext||window.webkitAudioContext)(); this.oscillator=this.audioCtx.createOscillator(); const gain=this.audioCtx.createGain(); this.oscillator.type='sine'; this.oscillator.frequency.value=880; this.oscillator.connect(gain); gain.connect(this.audioCtx.destination); gain.gain.value=0.0001; this.oscillator.start(); gain.gain.exponentialRampToValueAtTime(0.08,this.audioCtx.currentTime+0.6); let up=true; this.alarmIntervalId=setInterval(()=>{ if(!this.oscillator) return; this.oscillator.frequency.setValueAtTime(up?880:660,this.audioCtx.currentTime); up=!up; },600); }catch(err){ console.warn('WebAudio failed',this.id,err); alert('Time is up!'); } }
+
+  stopAlarm(userStop=true){ if(!this.alarmPlaying) return; this.alarmPlaying=false; try{ if(this.alarmIntervalId){ clearInterval(this.alarmIntervalId); this.alarmIntervalId=null; } if(this.oscillator){ try{ this.oscillator.stop(); }catch(e){} this.oscillator=null; } if(this.audioCtx){ try{ this.audioCtx.close(); }catch(e){} this.audioCtx=null; } }catch(e){} this.card.classList.remove('flash'); this.stopAlarmBtn.style.display='none'; if(userStop) try{ if(navigator.vibrate) navigator.vibrate(80); }catch(e){} }
+
+  _clearScheduledStart(){ if(this.scheduledStartTimeout){ clearTimeout(this.scheduledStartTimeout); this.scheduledStartTimeout=null; } this._clearScheduledCountdown(); this.scheduledStatus.style.display='none'; this.adjustEndBtn.style.display='none'; this.scheduledStatus.classList.remove('error'); this.startBtn.disabled=false; }
+
+  _startScheduledCountdown(target_ms){ this._clearScheduledCountdown(); const update=()=>{ const left=target_ms-Date.now(); if(left<=0){ this.scheduledStatus.style.display='none'; this._clearScheduledCountdown(); return; } this.scheduledStatus.style.display='block'; this.scheduledStatus.classList.remove('error'); this.scheduledStatus.textContent=`Starts in ${this._formatMsToHHMMSS(left)} (at ${new Date(target_ms).toLocaleString()})`; }; update(); this.scheduledCountdownInterval=setInterval(update,1000); }
+
+  _clearScheduledCountdown(){ if(this.scheduledCountdownInterval){ clearInterval(this.scheduledCountdownInterval); this.scheduledCountdownInterval=null; } }
+
+  _updateScheduledStatus(){ if(!(this.locked && this.lockedEnd_ms && this.totalSeconds)){ this._clearScheduledCountdown(); this.scheduledStatus.style.display='none'; this.adjustEndBtn.style.display='none'; return; } const desiredStart_ms=this.lockedEnd_ms - (this.totalSeconds*1000); if(desiredStart_ms>Date.now()){ this._startScheduledCountdown(desiredStart_ms); this.adjustEndBtn.style.display='none'; } else { this._clearScheduledCountdown(); this.scheduledStatus.style.display='block'; this.scheduledStatus.classList.add('error'); this.scheduledStatus.textContent='Start time already passed for the locked end time. Please choose a later end time or use "Adjust end to allow start now".'; this.adjustEndBtn.style.display='inline-block'; this.startBtn.disabled=true; } }
+
+  _recordStartTimestamp(ms){ try{ const d=new Date(ms); const formatted=d.toLocaleString(); if(this.startHistoryEl.style.display==='none') this.startHistoryEl.style.display='block'; const el=document.createElement('div'); el.textContent=`Started: ${formatted}`; this.startHistoryEl.prepend(el); }catch(e){ console.warn('failed to record start',e); } }
+
+  _adjustEndToNowPlusDuration(){ const now=Date.now(); const newEnd=now + (this.totalSeconds*1000); this.lockedEnd_ms=newEnd; try{ const dt=new Date(newEnd); const local=new Date(dt.getTime()-dt.getTimezoneOffset()*60000); this.endTimePicker.value = local.toISOString().slice(0,16); }catch(e){} this._calculateAndShowEndTime(); this._updateScheduledStatus(); showToast('End adjusted to allow immediate start'); this.adjustEndBtn.style.display='none'; this.startBtn.disabled=false; }
+
+  clear(){ if(this.intervalId){ clearInterval(this.intervalId); this.intervalId=null; } this._clearScheduledStart(); this.stopAlarm(false); this.totalSeconds=0; this.remaining=0; this.paused=false; this.taskNameInput.value=''; this.hoursInput.value=0; this.minutesInput.value=0; this.secondsInput.value=0; this.startBtn.disabled=false; this.pauseBtn.disabled=true; this.resetBtn.disabled=true; this.card.classList.remove('flash'); try{ const now=new Date(Date.now()-new Date().getTimezoneOffset()*60000); this.endTimePicker.value = now.toISOString().slice(0,16); }catch(e){} if(this.endTimeDisplay) this.endTimeDisplay.style.display='none'; this.locked=false; this.lockedEnd_ms=null; this.lockToggleBtn.classList.remove('lock-active'); this.lockToggleBtn.textContent='Lock'; this.startHistoryEl.innerHTML=''; this.startHistoryEl.style.display='none'; this.endAddHours.value=''; this.endAddMinutes.value=''; this.endAddSeconds.value=''; this._updateUI(); }
+
+  destroy(){ if(this.intervalId){ clearInterval(this.intervalId); this.intervalId=null; } this._clearScheduledStart(); this.stopAlarm(false); this.startBtn.removeEventListener('click', this._startHandler); this.pauseBtn.removeEventListener('click', this._pauseHandler); this.resetBtn.removeEventListener('click', this._resetHandler); this.stopAlarmBtn.removeEventListener('click', this._stopAlarmHandler); this.clearBtn.removeEventListener('click', this._clearHandler); this.removeBtn.removeEventListener('click', this._removeHandler); this.setFromEndTimeBtn.removeEventListener('click', this._setFromEndTimeHandler); if(this._copyHandler) this.copyEndBtn.removeEventListener('click', this._copyHandler); if(this._lockHandler) this.lockToggleBtn.removeEventListener('click', this._lockHandler); if(this._adjustHandler) this.adjustEndBtn.removeEventListener('click', this._adjustHandler); if(this._applyAddHandler) this.endApplyAdd.removeEventListener('click', this._applyAddHandler); if(this._collapseHandler) this.collapseBtn.removeEventListener('click', this._collapseHandler);
     this.card.remove();
-
-    // remove from timersList
-    const idx = timersList.findIndex(t => t.id === this.id);
-    if (idx >= 0) timersList.splice(idx,1);
+    const idx=timersList.findIndex(t=>t.id===this.id); if(idx>=0) timersList.splice(idx,1);
   }
 }
 
-// add button
-addBtn.addEventListener('click', () => createTimer());
-
-// create one initially
+addBtn.addEventListener('click', ()=>createTimer());
 createTimer();
+function createTimer(){ TIMER_COUNTER++; const t=new TaskTimer(TIMER_COUNTER); timersList.push(t); setTimeout(()=>t.card.focus(),50); }
 
-function createTimer(){
-  TIMER_COUNTER++;
-  const t = new TaskTimer(TIMER_COUNTER);
-  timersList.push(t);
-  // focus the new card so keyboard shortcuts work immediately
-  setTimeout(()=> t.card.focus(), 50);
-}
+document.addEventListener('keydown',(e)=>{ if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='n'){ e.preventDefault(); createTimer(); } });
 
-// convenience: Ctrl/Cmd + N -> new timer
-document.addEventListener('keydown', (e)=>{
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase()==='n'){
-    e.preventDefault();
-    createTimer();
-  }
-});
-
-// ensure no global cleanup interferes with instances
-window.addEventListener('beforeunload', ()=>{
-  // politely stop all alarms (instance-specific)
-  timersList.forEach(t => {
-    try{ t.stopAlarm(false); if (t.intervalId) clearInterval(t.intervalId); }catch(e){}
-  });
-});
+window.addEventListener('beforeunload',()=>{ timersList.forEach(t=>{ try{ t.stopAlarm(false); if(t.intervalId) clearInterval(t.intervalId); t._clearScheduledStart(); }catch(e){} }); });
 </script>
 </body>
 </html>
