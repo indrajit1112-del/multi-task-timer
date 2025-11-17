@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Multi Task Timer — Fixed (w/ End Time)</title>
+<style>
+  :root{
+    --bg:#071427; --card:#0b1220; --accent:#06b6d4; --muted:#94a3b8;
+  }
+  body{
+    margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Arial;
+    background:linear-gradient(180deg,#071427 0%, #021018 100%); color:#e6eef6;
+    min-height:100vh; padding:28px;
+  }
+  .wrap{ max-width:1100px; margin:0 auto; }
+  header{ display:flex; align-items:center; gap:12px; margin-bottom:18px; flex-wrap:wrap;}
+  h1{margin:0; font-size:20px}
+  button.add{ background:var(--accent); color:#022029; border:0; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:700 }
+  .grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px; align-items:start }
+
+  .timer-card{
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border-radius:12px; padding:14px; border:1px solid rgba(255,255,255,0.03);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.6);
+  }
+  .timer-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px }
+  label{ font-size:12px; color:var(--muted); display:block; margin-bottom:4px }
+  input[type="text"], input[type="number"]{
+    background:transparent; border:1px solid rgba(255,255,255,0.06); padding:8px 10px; color:inherit; border-radius:8px;
+  }
+  input[type="number"]{ width:80px }
+  .controls{ display:flex; gap:8px; margin-left:auto }
+  .controls button{ padding:8px 10px; border-radius:8px; border:0; cursor:pointer; font-weight:600 }
+  .btn-primary{ background:var(--accent); color:#022029 }
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,0.06); color:var(--muted) }
+  .time-display{ font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; font-size:18px; margin-left:auto }
+  .defrag{ display:grid; grid-template-columns: repeat(60, 1fr); gap:3px; align-items:center; margin-top:8px }
+  .block{ height:12px; border-radius:3px; background:rgba(255,255,255,0.04); transition:background 240ms, transform 240ms; box-shadow: inset 0 -2px 4px rgba(0,0,0,0.4); }
+  .block.active{ background: linear-gradient(90deg, var(--accent), #8be7ff); transform: scaleY(1.05) }
+  .small{ font-size:12px; color:var(--muted); margin-top:8px }
+  .flash{ animation: flash-bg 800ms linear infinite }
+  @keyframes flash-bg {
+    0%{ box-shadow: 0 8px 20px rgba(0,0,0,0.6) }
+    50%{ box-shadow: 0 0 40px 6px rgba(6,182,212,0.08) }
+    100%{ box-shadow: 0 8px 20px rgba(0,0,0,0.6) }
+  }
+
+  @media (max-width:720px){
+    .timer-row{ flex-direction:column; align-items:stretch }
+    .controls{ margin-left:0 }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Multi Task Timer — Fixed</h1>
+      
+      <div id="realtimeClock" style="flex:1; text-align:center; font-family:ui-monospace, monospace; color:var(--muted); font-size:13px; line-height:1.4;">
+        IST: --:--:-- <br> Epoch: ...
+      </div>
+      
+      <button id="addTimerBtn" class="add">+ Add Timer</button>
+      <div style="margin-left:auto; color:var(--muted); font-size:13px">Each timer is fully independent</div>
+    </header>
+
+    <div id="timers" class="grid" aria-live="polite"></div>
+  </div>
+
+<script>
+/*
+  Fixed Multi-Timer
+  - Each TaskTimer instance is fully self-contained.
+  - No shared global alarm loops/intervals.
+  - Instances tracked in an array (timersList) for safety.
+  - Buttons and handlers are bound per-instance.
+  - NEW: Shows IST/Epoch end time per timer.
+  - NEW: Shows global IST/Epoch clock in header.
+*/
+
+const timersContainer = document.getElementById('timers');
+const addBtn = document.getElementById('addTimerBtn');
+const clockDisplay = document.getElementById('realtimeClock');
+let TIMER_COUNTER = 0;
+const timersList = []; // keep references to instances
+
+// request notification permission once
+if ('Notification' in window && Notification.permission === 'default') {
+  Notification.requestPermission().catch(()=>{});
+}
+
+// --- NEW: Global Clock Function ---
+function updateRealtimeClock() {
+  const now = new Date();
+  const istOptions = {
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  };
+  const istTime = now.toLocaleString('en-US', istOptions);
+  const epochTime = Math.floor(now.getTime() / 1000);
+  
+  if (clockDisplay) {
+    clockDisplay.innerHTML = `IST: ${istTime} <br> Epoch: ${epochTime}`;
+  }
+}
+// Start the global clock
+updateRealtimeClock();
+setInterval(updateRealtimeClock, 1000);
+// --- End Global Clock ---
+
+
+class TaskTimer {
+  constructor(id){
+    this.id = id;
+
+    // instance state
+    this.totalSeconds = 0;
+    this.remaining = 0;
+    this.intervalId = null;         // interval id (per-instance)
+    this.startedAt = 0;
+    this.paused = false;
+
+    // audio/alarm state (per-instance)
+    this.alarmPlaying = false;
+    this.audioCtx = null;
+    this.oscillator = null;
+    this.alarmIntervalId = null;    // id returned by setInterval for pitch modulation
+
+    // DOM references
+    this.card = null;
+    this.taskNameInput = null;
+    this.hoursInput = null;
+    this.minutesInput = null;
+    this.secondsInput = null;
+    this.timeText = null;
+    this.startBtn = null;
+    this.pauseBtn = null;
+    this.resetBtn = null;
+    this.stopAlarmBtn = null;
+    this.clearBtn = null;
+    this.removeBtn = null;
+    this.defrag = null;
+    this.percentText = null;
+    this.blocks = [];
+    this.BLOCK_COUNT = 60;
+    
+    // NEW: End time DOM references
+    this.endTimeDisplay = null;
+    this.endTimeIST = null;
+    this.endTimeEpoch = null;
+
+    this._buildDOM();
+    this._bindHandlers();
+    this._updateFromInputs(); // initialize
+    this._updateUI();
+  }
+
+  _buildDOM(){
+    const card = document.createElement('div');
+    card.className = 'timer-card';
+    card.dataset.tid = this.id;
+    card.innerHTML = `
+      <div class="timer-row">
+        <div style="flex:1; min-width:120px">
+          <label>Task name</label>
+          <input class="taskName" type="text" placeholder="E.g. Edit video / Study AI" />
+        </div>
+
+        <div>
+          <label>Hours</label>
+          <input class="hours" type="number" min="0" step="1" value="0" />
+        </div>
+
+        <div>
+          <label>Minutes</label>
+          <input class="minutes" type="number" min="0" max="59" step="1" value="30" />
+        </div>
+
+        <div>
+          <label>Seconds</label>
+          <input class="seconds" type="number" min="0" max="59" step="1" value="0" />
+        </div>
+
+        <div class="time-display"><span class="timeText">00:30:00</span></div>
+      </div>
+      
+      <div class="end-time-display" style="display:none; font-size:12px; color:var(--muted); margin-bottom:10px; padding: 0 4px;">
+        <span>Est. End (IST): <strong class="endTimeIST">--:--:--</strong></span>
+        <span style="margin-left:14px;">Epoch: <strong class="endTimeEpoch">...</strong></span>
+      </div>
+
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+        <div class="controls" style="margin-left:0">
+          <button class="start btn-primary">Start</button>
+          <button class="pause btn-ghost" disabled>Pause</button>
+          <button class="reset btn-ghost" disabled>Reset</button>
+          <button class="stopAlarm btn-ghost" style="display:none">Stop Alarm</button>
+          <button class="clear btn-ghost">Clear</button>
+          <button class="remove btn-ghost" title="Remove this timer">Remove</button>
+        </div>
+        <div style="margin-left:auto; font-size:12px; color:var(--muted)"><span class="percentText">100%</span></div>
+      </div>
+
+      <div class="defrag" aria-hidden="true"></div>
+      <div class="small">Visual: 60 blocks represent remaining percentage.</div>
+    `;
+    timersContainer.prepend(card);
+
+    // save refs
+    this.card = card;
+    this.taskNameInput = card.querySelector('.taskName');
+    this.hoursInput = card.querySelector('.hours');
+    this.minutesInput = card.querySelector('.minutes');
+    this.secondsInput = card.querySelector('.seconds');
+    this.timeText = card.querySelector('.timeText');
+    this.startBtn = card.querySelector('.start');
+    this.pauseBtn = card.querySelector('.pause');
+    this.resetBtn = card.querySelector('.reset');
+    this.stopAlarmBtn = card.querySelector('.stopAlarm');
+    this.clearBtn = card.querySelector('.clear');
+    this.removeBtn = card.querySelector('.remove');
+    this.defrag = card.querySelector('.defrag');
+    this.percentText = card.querySelector('.percentText');
+    
+    // NEW: Save end time refs
+    this.endTimeDisplay = card.querySelector('.end-time-display');
+    this.endTimeIST = card.querySelector('.endTimeIST');
+    this.endTimeEpoch = card.querySelector('.endTimeEpoch');
+
+    // build blocks (instance-local)
+    this.defrag.innerHTML = '';
+    for (let i=0; i<this.BLOCK_COUNT; i++){
+      const b = document.createElement('div');
+      b.className = 'block';
+      this.defrag.appendChild(b);
+      this.blocks.push(b);
+    }
+
+    // allow keyboard focus per card
+    this.card.tabIndex = 0;
+  }
+
+  _bindHandlers(){
+    // bind methods so 'this' remains correct
+    this._startHandler = (e) => { e && e.preventDefault(); this.start(); };
+    this._pauseHandler = (e) => { e && e.preventDefault(); this.pause(); };
+    this._resetHandler = (e) => { e && e.preventDefault(); this.reset(); };
+    this._stopAlarmHandler = (e) => { e && e.preventDefault(); this.stopAlarm(true); };
+    this._clearHandler = (e) => { e && e.preventDefault(); this.clear(); };
+    this._removeHandler = (e) => { e && e.preventDefault(); this.destroy(); };
+
+    this.startBtn.addEventListener('click', this._startHandler);
+    this.pauseBtn.addEventListener('click', this._pauseHandler);
+    this.resetBtn.addEventListener('click', this._resetHandler);
+    this.stopAlarmBtn.addEventListener('click', this._stopAlarmHandler);
+    this.clearBtn.addEventListener('click', this._clearHandler);
+    this.removeBtn.addEventListener('click', this._removeHandler);
+
+    // live update inputs only affect this instance (and only when not running)
+    const inputs = [this.hoursInput, this.minutesInput, this.secondsInput];
+    inputs.forEach(inp => {
+      inp.addEventListener('input', () => {
+        if (!this.intervalId) {
+          this._updateFromInputs();
+          this._updateUI();
+        }
+      });
+    });
+
+    // local keyboard shortcuts when card focused
+    this.card.addEventListener('keydown', (ev) => {
+      if (ev.code === 'Space'){ ev.preventDefault(); this.intervalId ? this.pause() : this.start(); }
+      if (ev.key && ev.key.toLowerCase() === 'r') { this.reset(); }
+    });
+  }
+
+  _updateFromInputs(){
+    const h = Math.max(0, parseInt(this.hoursInput.value || 0));
+    const m = Math.max(0, parseInt(this.minutesInput.value || 0));
+    const s = Math.max(0, parseInt(this.secondsInput.value || 0));
+    this.totalSeconds = h*3600 + m*60 + s;
+    this.remaining = this.totalSeconds;
+    
+    // NEW: Calculate end time
+    this._calculateAndShowEndTime();
+  }
+
+  // --- NEW: Calculate and Show End Time Function ---
+  _calculateAndShowEndTime(){
+    let durationInSeconds = 0;
+    let baseTime_ms = 0;
+
+    if (this.intervalId || this.paused) { // Timer is running or paused
+      // Use the original start time and total duration for a fixed end time
+      durationInSeconds = this.totalSeconds;
+      baseTime_ms = this.startedAt;
+    } else { // Timer is stopped/reset
+      // Calculate based on current inputs + now
+      durationInSeconds = this.remaining; // 'remaining' is set by _updateFromInputs
+      baseTime_ms = Date.now();
+    }
+
+    if (durationInSeconds <= 0) {
+      this.endTimeDisplay.style.display = 'none';
+      return;
+    }
+
+    const end_ms = baseTime_ms + (durationInSeconds * 1000);
+    const endDate = new Date(end_ms);
+
+    const istOptions = {
+      timeZone: 'Asia/Kolkata',
+      hour12: true,
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric'
+    };
+
+    const endTimeIST = endDate.toLocaleString('en-US', istOptions);
+    const endTimeEpoch = Math.floor(end_ms / 1000);
+
+    this.endTimeIST.textContent = endTimeIST;
+    this.endTimeEpoch.textContent = endTimeEpoch;
+    this.endTimeDisplay.style.display = 'block';
+  }
+
+  _toHHMMSS(s){
+    s = Math.max(0, Math.floor(s));
+    const h = Math.floor(s/3600); s%=3600;
+    const m = Math.floor(s/60); s%=60;
+    const sec = s;
+    return [h,m,sec].map(v=>String(v).padStart(2,'0')).join(':');
+  }
+
+  _updateUI(){
+    this.timeText.textContent = this._toHHMMSS(this.remaining || 0);
+    const pct = this.totalSeconds ? Math.round((this.remaining/this.totalSeconds)*100) : 0;
+    this.percentText.textContent = pct + '%';
+    const activeCount = this.totalSeconds ? Math.round((this.remaining/this.totalSeconds||0)*this.BLOCK_COUNT) : 0;
+    this.blocks.forEach((b,i)=> i < activeCount ? b.classList.add('active') : b.classList.remove('active'));
+  }
+
+  start(){
+    if (this.intervalId) return; // already running
+    // compute if not set
+    if (!this.totalSeconds) this._updateFromInputs();
+    if (!this.totalSeconds) { alert('Please set a duration'); return; }
+    if (!this.remaining) this.remaining = this.totalSeconds;
+    
+    // Only set startedAt if it's not a resume from pause
+    if (!this.paused) {
+        this.startedAt = Date.now();
+    }
+    
+    this.paused = false;
+    this.startBtn.disabled = true;
+    this.pauseBtn.disabled = false;
+    this.resetBtn.disabled = false;
+    this._requestNotificationPermission();
+    
+    // NEW: "Lock in" the end time display on start
+    this._calculateAndShowEndTime();
+    
+    // accurate-ish tick using fixed step; kept per-instance
+    this.intervalId = setInterval(()=> this._tick(), 250);
+    this._updateUI();
+  }
+
+  pause(){
+    if (!this.intervalId) return;
+    clearInterval(this.intervalId);
+    this.intervalId = null;
+    this.paused = true;
+    this.startBtn.disabled = false;
+    this.pauseBtn.disabled = true;
+    
+    // Recalculate 'remaining' based on elapsed time since 'startedAt'
+    // This makes the 'remaining' value accurate even if the browser tab was inactive
+    const elapsed_ms = Date.now() - this.startedAt;
+    const elapsed_s = elapsed_ms / 1000;
+    this.remaining = Math.max(0, this.totalSeconds - elapsed_s);
+    
+    this._updateUI(); // Update UI with precise remaining time
+  }
+
+  reset(){
+    if (this.intervalId){
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    this._updateFromInputs(); // This will also call _calculateAndShowEndTime
+    this.paused = false;
+    this.startBtn.disabled = false;
+    this.pauseBtn.disabled = true;
+    this.resetBtn.disabled = true;
+    this.stopAlarm(false);
+    this.card.classList.remove('flash');
+    this._updateUI();
+  }
+
+  _tick(){
+    // This tick is now more of a UI updater.
+    // We calculate remaining time based on start time for accuracy.
+    const elapsed_ms = Date.now() - this.startedAt;
+    const elapsed_s = elapsed_ms / 1000;
+    this.remaining = Math.max(0, this.totalSeconds - elapsed_s);
+    
+    if (this.remaining <= 0){
+      this.remaining = 0;
+      if (this.intervalId){ clearInterval(this.intervalId); this.intervalId = null; }
+      this._onFinish();
+    }
+    this._updateUI();
+  }
+
+  _onFinish(){
+    this.startBtn.disabled = false;
+    this.pauseBtn.disabled = true;
+    this.resetBtn.disabled = false;
+    const title = this.taskNameInput.value.trim() || 'Timer';
+    this._showNotification(`${title} — Time is up!`);
+    this.playAlarm();
+    try { if (navigator.vibrate) navigator.vibrate([300,150,300]); } catch(e){}
+    this.card.classList.add('flash');
+    this.stopAlarmBtn.style.display = 'inline-block';
+  }
+
+  _requestNotificationPermission(){
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') Notification.requestPermission().catch(()=>{});
+  }
+
+  _showNotification(body){
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'granted'){
+      const n = new Notification(this.taskNameInput.value.trim() || 'Timer', { body, silent: true });
+      n.onclick = () => window.focus();
+    }
+  }
+
+  playAlarm(){
+    if (this.alarmPlaying) return;
+    this.alarmPlaying = true;
+    try {
+      // make a fresh AudioContext per-instance
+      this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      this.oscillator = this.audioCtx.createOscillator();
+      const gain = this.audioCtx.createGain();
+      this.oscillator.type = 'sine';
+      this.oscillator.frequency.value = 880;
+      this.oscillator.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      gain.gain.value = 0.0001;
+      this.oscillator.start();
+      gain.gain.exponentialRampToValueAtTime(0.08, this.audioCtx.currentTime + 0.6);
+
+      // modulation loop kept in instance-scoped interval id
+      let up = true;
+      this.alarmIntervalId = setInterval(() => {
+        if (!this.oscillator) return;
+        this.oscillator.frequency.setValueAtTime(up ? 880 : 660, this.audioCtx.currentTime);
+        up = !up;
+      }, 600);
+
+    } catch(err){
+      console.warn('WebAudio failed for instance', this.id, err);
+      alert('Time is up!');
+    }
+  }
+
+  stopAlarm(userStop = true){
+    if (!this.alarmPlaying) return;
+    this.alarmPlaying = false;
+    try {
+      if (this.alarmIntervalId) { clearInterval(this.alarmIntervalId); this.alarmIntervalId = null; }
+      if (this.oscillator) { try { this.oscillator.stop(); } catch(e){} this.oscillator = null; }
+      if (this.audioCtx) { try { this.audioCtx.close(); } catch(e){} this.audioCtx = null; }
+    } catch(e){}
+    this.card.classList.remove('flash');
+    this.stopAlarmBtn.style.display = 'none';
+    if (userStop) try{ if (navigator.vibrate) navigator.vibrate(80); }catch(e){}
+  }
+
+  clear(){
+    // stop any running interval & alarm and reset inputs (this instance only)
+    if (this.intervalId){ clearInterval(this.intervalId); this.intervalId = null; }
+    this.stopAlarm(false);
+    this.totalSeconds = 0;
+    this.remaining = 0;
+    this.paused = false;
+    this.taskNameInput.value = '';
+    this.hoursInput.value = 0;
+    this.minutesInput.value = 0;
+    this.secondsInput.value = 0;
+    this.startBtn.disabled = false;
+    this.pauseBtn.disabled = true;
+    this.resetBtn.disabled = true;
+    this.card.classList.remove('flash');
+    
+    // NEW: Hide end time display
+    if(this.endTimeDisplay) {
+      this.endTimeDisplay.style.display = 'none';
+    }
+    
+    this._updateUI();
+  }
+
+  destroy(){
+    // gracefully clean instance
+    if (this.intervalId){ clearInterval(this.intervalId); this.intervalId = null; }
+    this.stopAlarm(false);
+    // remove event listeners (defensive)
+    this.startBtn.removeEventListener('click', this._startHandler);
+    this.pauseBtn.removeEventListener('click', this._pauseHandler);
+    this.resetBtn.removeEventListener('click', this._resetHandler);
+    this.stopAlarmBtn.removeEventListener('click', this._stopAlarmHandler);
+    this.clearBtn.removeEventListener('click', this._clearHandler);
+    this.removeBtn.removeEventListener('click', this._removeHandler);
+
+    // remove DOM
+    this.card.remove();
+
+    // remove from timersList
+    const idx = timersList.findIndex(t => t.id === this.id);
+    if (idx >= 0) timersList.splice(idx,1);
+  }
+}
+
+// add button
+addBtn.addEventListener('click', () => createTimer());
+
+// create one initially
+createTimer();
+
+function createTimer(){
+  TIMER_COUNTER++;
+  const t = new TaskTimer(TIMER_COUNTER);
+  timersList.push(t);
+  // focus the new card so keyboard shortcuts work immediately
+  setTimeout(()=> t.card.focus(), 50);
+}
+
+// convenience: Ctrl/Cmd + N -> new timer
+document.addEventListener('keydown', (e)=>{
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase()==='n'){
+    e.preventDefault();
+    createTimer();
+  }
+});
+
+// ensure no global cleanup interferes with instances
+window.addEventListener('beforeunload', ()=>{
+  // politely stop all alarms (instance-specific)
+  timersList.forEach(t => {
+    try{ t.stopAlarm(false); if (t.intervalId) clearInterval(t.intervalId); }catch(e){}
+  });
+});
+</script>
+</body>
+</html>
