@@ -26,10 +26,13 @@
   }
   .timer-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px }
   label{ font-size:12px; color:var(--muted); display:block; margin-bottom:4px }
-  input[type="text"], input[type="number"]{
+  input[type="text"], input[type="number"], input[type="datetime-local"]{
     background:transparent; border:1px solid rgba(255,255,255,0.06); padding:8px 10px; color:inherit; border-radius:8px;
+    color-scheme: dark; /* Ensures date picker is dark */
   }
   input[type="number"]{ width:80px }
+  input[type="datetime-local"] { width: 100%; box-sizing: border-box; }
+
   .controls{ display:flex; gap:8px; margin-left:auto }
   .controls button{ padding:8px 10px; border-radius:8px; border:0; cursor:pointer; font-weight:600 }
   .btn-primary{ background:var(--accent); color:#022029 }
@@ -75,8 +78,10 @@
   - No shared global alarm loops/intervals.
   - Instances tracked in an array (timersList) for safety.
   - Buttons and handlers are bound per-instance.
-  - NEW: Shows IST/Epoch end time per timer.
-  - NEW: Shows global IST/Epoch clock in header.
+  - Shows IST/Epoch end time per timer.
+  - Shows global IST/Epoch clock in header.
+  - Can set duration from a specific end date/time.
+  - NEW: End date/time picker defaults to current local time.
 */
 
 const timersContainer = document.getElementById('timers');
@@ -90,7 +95,7 @@ if ('Notification' in window && Notification.permission === 'default') {
   Notification.requestPermission().catch(()=>{});
 }
 
-// --- NEW: Global Clock Function ---
+// --- Global Clock Function ---
 function updateRealtimeClock() {
   const now = new Date();
   const istOptions = {
@@ -148,10 +153,14 @@ class TaskTimer {
     this.blocks = [];
     this.BLOCK_COUNT = 60;
     
-    // NEW: End time DOM references
+    // End time DOM references
     this.endTimeDisplay = null;
     this.endTimeIST = null;
     this.endTimeEpoch = null;
+    
+    // Set from end time DOM references
+    this.endTimePicker = null;
+    this.setFromEndTimeBtn = null;
 
     this._buildDOM();
     this._bindHandlers();
@@ -186,6 +195,16 @@ class TaskTimer {
         </div>
 
         <div class="time-display"><span class="timeText">00:30:00</span></div>
+      </div>
+      
+      <div class="timer-row" style="margin-bottom:12px; border-top: 1px solid rgba(255,255,255,0.05); padding-top:12px;">
+        <div style="flex:1; min-width: 150px;">
+          <label>Set duration by end time (Your Local)</label>
+          <input class="endTimePicker" type="datetime-local" />
+        </div>
+        <div style="align-self: end;">
+          <button class="setFromEndTime btn-ghost" style="padding:8px 10px; width: 100%;">Set Duration</button>
+        </div>
       </div>
       
       <div class="end-time-display" style="display:none; font-size:12px; color:var(--muted); margin-bottom:10px; padding: 0 4px;">
@@ -226,10 +245,24 @@ class TaskTimer {
     this.defrag = card.querySelector('.defrag');
     this.percentText = card.querySelector('.percentText');
     
-    // NEW: Save end time refs
+    // Save end time refs
     this.endTimeDisplay = card.querySelector('.end-time-display');
     this.endTimeIST = card.querySelector('.endTimeIST');
     this.endTimeEpoch = card.querySelector('.endTimeEpoch');
+    
+    // Save 'set from end time' refs
+    this.endTimePicker = card.querySelector('.endTimePicker');
+    this.setFromEndTimeBtn = card.querySelector('.setFromEndTime');
+
+    // --- NEW: Set default value for datetime picker ---
+    // This formats the current local date and time to YYYY-MM-DDThh:mm
+    try {
+      const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+      this.endTimePicker.value = now.toISOString().slice(0, 16);
+    } catch (e) {
+      console.warn("Could not set default date-time", e);
+    }
+    // --- End New ---
 
     // build blocks (instance-local)
     this.defrag.innerHTML = '';
@@ -252,6 +285,9 @@ class TaskTimer {
     this._stopAlarmHandler = (e) => { e && e.preventDefault(); this.stopAlarm(true); };
     this._clearHandler = (e) => { e && e.preventDefault(); this.clear(); };
     this._removeHandler = (e) => { e && e.preventDefault(); this.destroy(); };
+    
+    // bind 'set from end time'
+    this._setFromEndTimeHandler = (e) => { e && e.preventDefault(); this.setDurationFromEndTime(); };
 
     this.startBtn.addEventListener('click', this._startHandler);
     this.pauseBtn.addEventListener('click', this._pauseHandler);
@@ -259,6 +295,9 @@ class TaskTimer {
     this.stopAlarmBtn.addEventListener('click', this._stopAlarmHandler);
     this.clearBtn.addEventListener('click', this._clearHandler);
     this.removeBtn.addEventListener('click', this._removeHandler);
+    
+    // add 'set from end time' listener
+    this.setFromEndTimeBtn.addEventListener('click', this._setFromEndTimeHandler);
 
     // live update inputs only affect this instance (and only when not running)
     const inputs = [this.hoursInput, this.minutesInput, this.secondsInput];
@@ -277,6 +316,41 @@ class TaskTimer {
       if (ev.key && ev.key.toLowerCase() === 'r') { this.reset(); }
     });
   }
+  
+  // --- Set Duration from End Time Method ---
+  setDurationFromEndTime() {
+    const endTimeValue = this.endTimePicker.value;
+    if (!endTimeValue) {
+      alert("Please pick a date and time first.");
+      return;
+    }
+
+    // datetime-local input value is parsed as local time by new Date()
+    const endTime_ms = new Date(endTimeValue).getTime();
+    const now_ms = Date.now();
+
+    const durationSeconds = Math.round((endTime_ms - now_ms) / 1000);
+
+    if (durationSeconds <= 0) {
+      alert("Please select a time in the future.");
+      return;
+    }
+
+    // Deconstruct into H, M, S
+    let s = durationSeconds;
+    const h = Math.floor(s / 3600); s %= 3600;
+    const m = Math.floor(s / 60); s %= 60;
+    const sec = s;
+
+    // Populate the input fields
+    this.hoursInput.value = h;
+    this.minutesInput.value = m;
+    this.secondsInput.value = sec;
+
+    // Manually trigger updates
+    this._updateFromInputs();
+    this._updateUI();
+  }
 
   _updateFromInputs(){
     const h = Math.max(0, parseInt(this.hoursInput.value || 0));
@@ -285,11 +359,11 @@ class TaskTimer {
     this.totalSeconds = h*3600 + m*60 + s;
     this.remaining = this.totalSeconds;
     
-    // NEW: Calculate end time
+    // Calculate end time
     this._calculateAndShowEndTime();
   }
 
-  // --- NEW: Calculate and Show End Time Function ---
+  // --- Calculate and Show End Time Function ---
   _calculateAndShowEndTime(){
     let durationInSeconds = 0;
     let baseTime_ms = 0;
@@ -362,7 +436,7 @@ class TaskTimer {
     this.resetBtn.disabled = false;
     this._requestNotificationPermission();
     
-    // NEW: "Lock in" the end time display on start
+    // "Lock in" the end time display on start
     this._calculateAndShowEndTime();
     
     // accurate-ish tick using fixed step; kept per-instance
@@ -379,7 +453,6 @@ class TaskTimer {
     this.pauseBtn.disabled = true;
     
     // Recalculate 'remaining' based on elapsed time since 'startedAt'
-    // This makes the 'remaining' value accurate even if the browser tab was inactive
     const elapsed_ms = Date.now() - this.startedAt;
     const elapsed_s = elapsed_ms / 1000;
     this.remaining = Math.max(0, this.totalSeconds - elapsed_s);
@@ -403,7 +476,6 @@ class TaskTimer {
   }
 
   _tick(){
-    // This tick is now more of a UI updater.
     // We calculate remaining time based on start time for accuracy.
     const elapsed_ms = Date.now() - this.startedAt;
     const elapsed_s = elapsed_ms / 1000;
@@ -501,7 +573,13 @@ class TaskTimer {
     this.resetBtn.disabled = true;
     this.card.classList.remove('flash');
     
-    // NEW: Hide end time display
+    // NEW: Reset date/time picker to current time
+    try {
+      const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+      this.endTimePicker.value = now.toISOString().slice(0, 16);
+    } catch (e) {}
+    
+    // Hide end time display
     if(this.endTimeDisplay) {
       this.endTimeDisplay.style.display = 'none';
     }
@@ -520,6 +598,10 @@ class TaskTimer {
     this.stopAlarmBtn.removeEventListener('click', this._stopAlarmHandler);
     this.clearBtn.removeEventListener('click', this._clearHandler);
     this.removeBtn.removeEventListener('click', this._removeHandler);
+    
+    // remove 'set from end time' listener
+    this.setFromEndTimeBtn.removeEventListener('click', this._setFromEndTimeHandler);
+
 
     // remove DOM
     this.card.remove();
